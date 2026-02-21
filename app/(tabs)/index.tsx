@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, View, ScrollView, useColorScheme, Platform, RefreshControl } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, useColorScheme, Platform, RefreshControl, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useThemeColors } from '@/constants/colors';
 import { useStudyData } from '@/lib/useStudyData';
+import { useAuth } from '@/lib/useAuth';
 import { CircularProgress } from '@/components/CircularProgress';
 import { PieChart } from '@/components/PieChart';
 import { BarChart } from '@/components/BarChart';
@@ -15,6 +16,7 @@ export default function DashboardScreen() {
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = React.useState(false);
+  const { user, signOut } = useAuth();
 
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_600SemiBold, Inter_700Bold });
 
@@ -31,6 +33,13 @@ export default function DashboardScreen() {
     setRefreshing(false);
   };
 
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'destructive', onPress: signOut },
+    ]);
+  };
+
   if (!fontsLoaded) return null;
 
   const todayHours = getTodayHours();
@@ -40,7 +49,7 @@ export default function DashboardScreen() {
   const longestStreak = getLongestStreak();
   const subjectTotals = getSubjectTotals();
   const weeklyData = getWeeklyData();
-  const dailyProgress = Math.min(todayHours / settings.dailyGoalHours, 1);
+  const dailyProgress = Math.min(todayHours / settings.daily_goal_hours, 1);
 
   const pieData = subjectTotals.map((s, i) => ({
     label: s.subject,
@@ -49,6 +58,7 @@ export default function DashboardScreen() {
   }));
 
   const barData = weeklyData.map(d => ({ label: d.day, value: d.hours }));
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student';
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -61,7 +71,15 @@ export default function DashboardScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
         }
       >
-        <Text style={[styles.greeting, { color: colors.text, fontFamily: 'Inter_700Bold' }]}>Dashboard</Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={[styles.greeting, { color: colors.textSecondary, fontFamily: 'Inter_400Regular' }]}>Welcome back,</Text>
+            <Text style={[styles.name, { color: colors.text, fontFamily: 'Inter_700Bold' }]}>{displayName}</Text>
+          </View>
+          <Pressable onPress={handleSignOut} hitSlop={12}>
+            <Ionicons name="log-out-outline" size={24} color={colors.textSecondary} />
+          </Pressable>
+        </View>
 
         <View style={[styles.quoteCard, { backgroundColor: colors.tint + '15' }]}>
           <Ionicons name="bulb-outline" size={18} color={colors.tint} />
@@ -78,7 +96,7 @@ export default function DashboardScreen() {
               trackColor={colors.border}
               textColor={colors.text}
               valueText={`${todayHours.toFixed(1)}h`}
-              label={`/ ${settings.dailyGoalHours}h goal`}
+              label={`/ ${settings.daily_goal_hours}h goal`}
             />
           </View>
 
@@ -133,7 +151,7 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {badges.filter(b => b.unlockedAt).length > 0 ? (
+        {badges.some(b => b.unlocked_at) ? (
           <View style={[styles.card, { backgroundColor: colors.card }]}>
             <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: 'Inter_600SemiBold' }]}>Achievements</Text>
             <View style={styles.badgesRow}>
@@ -142,9 +160,9 @@ export default function DashboardScreen() {
                   flame: 'local-fire-department', trophy: 'emoji-events', star: 'star', rocket: 'rocket-launch', school: 'school',
                 };
                 return (
-                  <View key={b.id} style={[styles.badgeItem, { opacity: b.unlockedAt ? 1 : 0.3 }]}>
-                    <View style={[styles.badgeCircle, { backgroundColor: b.unlockedAt ? colors.tint + '20' : colors.border }]}>
-                      <MaterialIcons name={iconMap[b.icon] || 'star'} size={24} color={b.unlockedAt ? colors.tint : colors.textSecondary} />
+                  <View key={b.id} style={[styles.badgeItem, { opacity: b.unlocked_at ? 1 : 0.3 }]}>
+                    <View style={[styles.badgeCircle, { backgroundColor: b.unlocked_at ? colors.tint + '20' : colors.border }]}>
+                      <MaterialIcons name={iconMap[b.icon] || 'star'} size={24} color={b.unlocked_at ? colors.tint : colors.textSecondary} />
                     </View>
                     <Text style={[styles.badgeLabel, { color: colors.text, fontFamily: 'Inter_400Regular' }]} numberOfLines={1}>{b.title}</Text>
                   </View>
@@ -169,7 +187,9 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, gap: 16 },
-  greeting: { fontSize: 28, fontWeight: '700' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  greeting: { fontSize: 14 },
+  name: { fontSize: 24, fontWeight: '700' },
   quoteCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14 },
   quoteText: { fontSize: 13, flex: 1, lineHeight: 18 },
   progressRow: { flexDirection: 'row', gap: 12 },

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, useColorScheme, Platform,
-  TextInput, Pressable, Alert, FlatList,
+  TextInput, Pressable, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
@@ -15,7 +15,10 @@ export default function InputScreen() {
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { entries, settings, addEntry, removeEntry, updateSettings } = useStudyData();
+  const {
+    entries, settings, savedSubjects,
+    addEntry, removeEntry, updateSettings, removeSavedSubject,
+  } = useStudyData();
 
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_600SemiBold, Inter_700Bold });
 
@@ -23,7 +26,7 @@ export default function InputScreen() {
   const [subject, setSubject] = useState('');
   const [hours, setHours] = useState('');
   const [showGoalInput, setShowGoalInput] = useState(false);
-  const [goalInput, setGoalInput] = useState(settings.dailyGoalHours.toString());
+  const [goalInput, setGoalInput] = useState(settings.daily_goal_hours.toString());
 
   const todayEntries = entries.filter(e => e.date === selectedDate);
   const todayTotal = todayEntries.reduce((sum, e) => sum + e.hours, 0);
@@ -52,10 +55,15 @@ export default function InputScreen() {
   const handleSaveGoal = useCallback(async () => {
     const g = parseFloat(goalInput);
     if (isNaN(g) || g <= 0) return;
-    await updateSettings({ ...settings, dailyGoalHours: g });
+    await updateSettings({ ...settings, daily_goal_hours: g });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowGoalInput(false);
   }, [goalInput, settings, updateSettings]);
+
+  const selectSubject = (name: string) => {
+    setSubject(name);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   const changeDate = (offset: number) => {
     const d = new Date(selectedDate);
@@ -94,6 +102,38 @@ export default function InputScreen() {
           </Pressable>
         </View>
 
+        {savedSubjects.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
+            <Text style={[styles.label, { color: colors.textSecondary, fontFamily: 'Inter_600SemiBold' }]}>Quick Select Subject</Text>
+            <View style={styles.chipRow}>
+              {savedSubjects.map(s => (
+                <Pressable
+                  key={s.id}
+                  onPress={() => selectSubject(s.name)}
+                  onLongPress={() => {
+                    Alert.alert('Remove Subject', `Remove "${s.name}" from quick select?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Remove', style: 'destructive', onPress: () => removeSavedSubject(s.id) },
+                    ]);
+                  }}
+                  style={({ pressed }) => [
+                    styles.chip,
+                    {
+                      backgroundColor: subject === s.name ? colors.tint : colors.tint + '15',
+                      opacity: pressed ? 0.8 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.chipText, {
+                    color: subject === s.name ? '#fff' : colors.tint,
+                    fontFamily: 'Inter_600SemiBold',
+                  }]}>{s.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           <View style={styles.inputGroup}>
             <Text style={[styles.label, { color: colors.textSecondary, fontFamily: 'Inter_600SemiBold' }]}>Subject</Text>
@@ -104,6 +144,9 @@ export default function InputScreen() {
               value={subject}
               onChangeText={setSubject}
             />
+            <Text style={[styles.hint, { color: colors.textSecondary, fontFamily: 'Inter_400Regular' }]}>
+              New subjects are automatically saved for quick access
+            </Text>
           </View>
 
           <View style={styles.inputGroup}>
@@ -131,15 +174,15 @@ export default function InputScreen() {
           <View style={styles.goalLeft}>
             <Ionicons name="flag" size={18} color={colors.tint} />
             <Text style={[styles.goalText, { color: colors.text, fontFamily: 'Inter_600SemiBold' }]}>
-              Daily Goal: {settings.dailyGoalHours}h
+              Daily Goal: {settings.daily_goal_hours}h
             </Text>
-            <View style={[styles.goalBadge, { backgroundColor: todayTotal >= settings.dailyGoalHours ? colors.success + '20' : colors.accent + '20' }]}>
-              <Text style={[styles.goalBadgeText, { color: todayTotal >= settings.dailyGoalHours ? colors.success : colors.accent, fontFamily: 'Inter_600SemiBold' }]}>
-                {todayTotal >= settings.dailyGoalHours ? 'Done' : `${todayTotal.toFixed(1)}/${settings.dailyGoalHours}h`}
+            <View style={[styles.goalBadge, { backgroundColor: todayTotal >= settings.daily_goal_hours ? colors.success + '20' : colors.accent + '20' }]}>
+              <Text style={[styles.goalBadgeText, { color: todayTotal >= settings.daily_goal_hours ? colors.success : colors.accent, fontFamily: 'Inter_600SemiBold' }]}>
+                {todayTotal >= settings.daily_goal_hours ? 'Done' : `${todayTotal.toFixed(1)}/${settings.daily_goal_hours}h`}
               </Text>
             </View>
           </View>
-          <Pressable onPress={() => setShowGoalInput(!showGoalInput)} hitSlop={12}>
+          <Pressable onPress={() => { setShowGoalInput(!showGoalInput); setGoalInput(settings.daily_goal_hours.toString()); }} hitSlop={12}>
             <Feather name="edit-2" size={18} color={colors.textSecondary} />
           </Pressable>
         </View>
@@ -210,13 +253,17 @@ const styles = StyleSheet.create({
   dateCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dateText: { fontSize: 16 },
   card: { padding: 20, borderRadius: 16, gap: 14 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
+  chipText: { fontSize: 14 },
   inputGroup: { gap: 6 },
   label: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  hint: { fontSize: 12, marginTop: 2, fontStyle: 'italic' },
   input: { height: 48, borderRadius: 12, paddingHorizontal: 14, fontSize: 16, borderWidth: 1 },
   saveButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 14 },
   saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   goalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16 },
-  goalLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  goalLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   goalText: { fontSize: 15 },
   goalBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   goalBadgeText: { fontSize: 12, fontWeight: '600' },

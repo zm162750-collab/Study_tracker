@@ -1,27 +1,30 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from './supabase';
 
 export interface StudyEntry {
   id: string;
   date: string;
   subject: string;
   hours: number;
+  user_id?: string;
 }
 
 export interface HabitEntry {
   id: string;
   name: string;
-  createdAt: string;
+  created_at: string;
+  user_id?: string;
 }
 
 export interface HabitLog {
-  habitId: string;
+  id?: string;
+  habit_id: string;
   date: string;
   completed: boolean;
 }
 
 export interface UserSettings {
-  dailyGoalHours: number;
-  weeklyGoalHours: number;
+  daily_goal_hours: number;
+  weekly_goal_hours: number;
 }
 
 export interface Badge {
@@ -29,160 +32,232 @@ export interface Badge {
   title: string;
   description: string;
   icon: string;
-  unlockedAt: string | null;
+  unlocked_at: string | null;
 }
 
-const KEYS = {
-  STUDY_ENTRIES: 'study_entries',
-  HABITS: 'habits',
-  HABIT_LOGS: 'habit_logs',
-  SETTINGS: 'user_settings',
-  BADGES: 'badges',
-};
+export interface SavedSubject {
+  id: string;
+  name: string;
+  user_id?: string;
+}
 
-const DEFAULT_SETTINGS: UserSettings = {
-  dailyGoalHours: 2,
-  weeklyGoalHours: 14,
-};
-
-const DEFAULT_BADGES: Badge[] = [
-  { id: 'streak_7', title: '7 Day Streak', description: 'Study 7 days in a row', icon: 'flame', unlockedAt: null },
-  { id: 'streak_30', title: '30 Day Streak', description: 'Study 30 days in a row', icon: 'trophy', unlockedAt: null },
-  { id: 'hours_100', title: '100 Hours', description: 'Accumulate 100 study hours', icon: 'star', unlockedAt: null },
-  { id: 'first_session', title: 'First Session', description: 'Log your first study session', icon: 'rocket', unlockedAt: null },
-  { id: 'five_subjects', title: 'Well Rounded', description: 'Study 5 different subjects', icon: 'school', unlockedAt: null },
-];
+async function getUserId(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user?.id ?? null;
+}
 
 export async function getStudyEntries(): Promise<StudyEntry[]> {
-  const data = await AsyncStorage.getItem(KEYS.STUDY_ENTRIES);
-  return data ? JSON.parse(data) : [];
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from('study_entries')
+    .select('*')
+    .eq('user_id', userId)
+    .order('date', { ascending: false });
+  if (error) { console.error('getStudyEntries error:', error); return []; }
+  return data || [];
 }
 
-export async function saveStudyEntries(entries: StudyEntry[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.STUDY_ENTRIES, JSON.stringify(entries));
-}
-
-export async function addStudyEntry(entry: Omit<StudyEntry, 'id'>): Promise<StudyEntry> {
-  const entries = await getStudyEntries();
-  const newEntry: StudyEntry = { ...entry, id: Date.now().toString() + Math.random().toString(36).substr(2, 9) };
-  entries.push(newEntry);
-  await saveStudyEntries(entries);
-  return newEntry;
+export async function addStudyEntry(entry: { date: string; subject: string; hours: number }): Promise<StudyEntry | null> {
+  const userId = await getUserId();
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from('study_entries')
+    .insert({ ...entry, user_id: userId })
+    .select()
+    .single();
+  if (error) { console.error('addStudyEntry error:', error); return null; }
+  await ensureSavedSubject(entry.subject);
+  return data;
 }
 
 export async function deleteStudyEntry(id: string): Promise<void> {
-  const entries = await getStudyEntries();
-  await saveStudyEntries(entries.filter(e => e.id !== id));
+  const { error } = await supabase.from('study_entries').delete().eq('id', id);
+  if (error) console.error('deleteStudyEntry error:', error);
+}
+
+export async function getSavedSubjects(): Promise<SavedSubject[]> {
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from('saved_subjects')
+    .select('*')
+    .eq('user_id', userId)
+    .order('name');
+  if (error) { console.error('getSavedSubjects error:', error); return []; }
+  return data || [];
+}
+
+export async function ensureSavedSubject(name: string): Promise<void> {
+  const userId = await getUserId();
+  if (!userId) return;
+  const { data: existing } = await supabase
+    .from('saved_subjects')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('name', name)
+    .maybeSingle();
+  if (!existing) {
+    await supabase.from('saved_subjects').insert({ name, user_id: userId });
+  }
+}
+
+export async function deleteSavedSubject(id: string): Promise<void> {
+  const { error } = await supabase.from('saved_subjects').delete().eq('id', id);
+  if (error) console.error('deleteSavedSubject error:', error);
 }
 
 export async function getHabits(): Promise<HabitEntry[]> {
-  const data = await AsyncStorage.getItem(KEYS.HABITS);
-  return data ? JSON.parse(data) : [];
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from('habits')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at');
+  if (error) { console.error('getHabits error:', error); return []; }
+  return data || [];
 }
 
-export async function saveHabits(habits: HabitEntry[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.HABITS, JSON.stringify(habits));
-}
-
-export async function addHabit(name: string): Promise<HabitEntry> {
-  const habits = await getHabits();
-  const newHabit: HabitEntry = {
-    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-    name,
-    createdAt: new Date().toISOString(),
-  };
-  habits.push(newHabit);
-  await saveHabits(habits);
-  return newHabit;
+export async function addHabit(name: string): Promise<HabitEntry | null> {
+  const userId = await getUserId();
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from('habits')
+    .insert({ name, user_id: userId })
+    .select()
+    .single();
+  if (error) { console.error('addHabit error:', error); return null; }
+  return data;
 }
 
 export async function deleteHabit(id: string): Promise<void> {
-  const habits = await getHabits();
-  await saveHabits(habits.filter(h => h.id !== id));
-  const logs = await getHabitLogs();
-  await saveHabitLogs(logs.filter(l => l.habitId !== id));
+  const { error } = await supabase.from('habits').delete().eq('id', id);
+  if (error) console.error('deleteHabit error:', error);
 }
 
 export async function getHabitLogs(): Promise<HabitLog[]> {
-  const data = await AsyncStorage.getItem(KEYS.HABIT_LOGS);
-  return data ? JSON.parse(data) : [];
-}
-
-export async function saveHabitLogs(logs: HabitLog[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.HABIT_LOGS, JSON.stringify(logs));
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data, error } = await supabase
+    .from('habit_logs')
+    .select('*, habits!inner(user_id)')
+    .eq('habits.user_id', userId);
+  if (error) { console.error('getHabitLogs error:', error); return []; }
+  return (data || []).map((l: any) => ({
+    id: l.id,
+    habit_id: l.habit_id,
+    date: l.date,
+    completed: l.completed,
+  }));
 }
 
 export async function toggleHabitLog(habitId: string, date: string): Promise<void> {
-  const logs = await getHabitLogs();
-  const existingIndex = logs.findIndex(l => l.habitId === habitId && l.date === date);
-  if (existingIndex >= 0) {
-    if (logs[existingIndex].completed) {
-      logs.splice(existingIndex, 1);
+  const { data: existing } = await supabase
+    .from('habit_logs')
+    .select('id, completed')
+    .eq('habit_id', habitId)
+    .eq('date', date)
+    .maybeSingle();
+
+  if (existing) {
+    if (existing.completed) {
+      await supabase.from('habit_logs').delete().eq('id', existing.id);
     } else {
-      logs[existingIndex].completed = true;
+      await supabase.from('habit_logs').update({ completed: true }).eq('id', existing.id);
     }
   } else {
-    logs.push({ habitId, date, completed: true });
+    await supabase.from('habit_logs').insert({ habit_id: habitId, date, completed: true });
   }
-  await saveHabitLogs(logs);
 }
 
 export async function getSettings(): Promise<UserSettings> {
-  const data = await AsyncStorage.getItem(KEYS.SETTINGS);
-  return data ? JSON.parse(data) : DEFAULT_SETTINGS;
+  const userId = await getUserId();
+  if (!userId) return { daily_goal_hours: 2, weekly_goal_hours: 14 };
+  const { data } = await supabase
+    .from('user_settings')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+  if (data) return { daily_goal_hours: data.daily_goal_hours, weekly_goal_hours: data.weekly_goal_hours };
+  return { daily_goal_hours: 2, weekly_goal_hours: 14 };
 }
 
 export async function saveSettings(settings: UserSettings): Promise<void> {
-  await AsyncStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
+  const userId = await getUserId();
+  if (!userId) return;
+  await supabase.from('user_settings').upsert({
+    id: userId,
+    daily_goal_hours: settings.daily_goal_hours,
+    weekly_goal_hours: settings.weekly_goal_hours,
+  });
 }
 
 export async function getBadges(): Promise<Badge[]> {
-  const data = await AsyncStorage.getItem(KEYS.BADGES);
-  return data ? JSON.parse(data) : DEFAULT_BADGES;
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data } = await supabase
+    .from('user_badges')
+    .select('*')
+    .eq('user_id', userId);
+  
+  const DEFAULT_BADGES: Badge[] = [
+    { id: 'streak_7', title: '7 Day Streak', description: 'Study 7 days in a row', icon: 'flame', unlocked_at: null },
+    { id: 'streak_30', title: '30 Day Streak', description: 'Study 30 days in a row', icon: 'trophy', unlocked_at: null },
+    { id: 'hours_100', title: '100 Hours', description: 'Accumulate 100 study hours', icon: 'star', unlocked_at: null },
+    { id: 'first_session', title: 'First Session', description: 'Log your first study session', icon: 'rocket', unlocked_at: null },
+    { id: 'five_subjects', title: 'Well Rounded', description: 'Study 5 different subjects', icon: 'school', unlocked_at: null },
+  ];
+
+  if (!data || data.length === 0) return DEFAULT_BADGES;
+
+  return DEFAULT_BADGES.map(badge => {
+    const userBadge = data.find((b: any) => b.badge_id === badge.id);
+    return { ...badge, unlocked_at: userBadge?.unlocked_at || null };
+  });
 }
 
-export async function saveBadges(badges: Badge[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.BADGES, JSON.stringify(badges));
+export async function unlockBadge(badgeId: string): Promise<void> {
+  const userId = await getUserId();
+  if (!userId) return;
+  const { data: existing } = await supabase
+    .from('user_badges')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('badge_id', badgeId)
+    .maybeSingle();
+  if (!existing) {
+    await supabase.from('user_badges').insert({
+      user_id: userId,
+      badge_id: badgeId,
+      unlocked_at: new Date().toISOString(),
+    });
+  }
 }
 
 export async function checkAndUnlockBadges(entries: StudyEntry[]): Promise<Badge | null> {
   const badges = await getBadges();
-  let newlyUnlocked: Badge | null = null;
-
   const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
   const uniqueSubjects = new Set(entries.map(e => e.subject)).size;
-  const streak = calculateStudyStreak(entries);
+  const settings = await getSettings();
+  const streak = calculateStudyStreak(entries, settings.daily_goal_hours);
 
   for (const badge of badges) {
-    if (badge.unlockedAt) continue;
-
+    if (badge.unlocked_at) continue;
     let shouldUnlock = false;
     switch (badge.id) {
-      case 'first_session':
-        shouldUnlock = entries.length > 0;
-        break;
-      case 'streak_7':
-        shouldUnlock = streak >= 7;
-        break;
-      case 'streak_30':
-        shouldUnlock = streak >= 30;
-        break;
-      case 'hours_100':
-        shouldUnlock = totalHours >= 100;
-        break;
-      case 'five_subjects':
-        shouldUnlock = uniqueSubjects >= 5;
-        break;
+      case 'first_session': shouldUnlock = entries.length > 0; break;
+      case 'streak_7': shouldUnlock = streak >= 7; break;
+      case 'streak_30': shouldUnlock = streak >= 30; break;
+      case 'hours_100': shouldUnlock = totalHours >= 100; break;
+      case 'five_subjects': shouldUnlock = uniqueSubjects >= 5; break;
     }
-
     if (shouldUnlock) {
-      badge.unlockedAt = new Date().toISOString();
-      newlyUnlocked = badge;
+      await unlockBadge(badge.id);
+      return { ...badge, unlocked_at: new Date().toISOString() };
     }
   }
-
-  await saveBadges(badges);
-  return newlyUnlocked;
+  return null;
 }
 
 export function formatDate(date: Date): string {
@@ -218,11 +293,9 @@ export function calculateStudyStreak(entries: StudyEntry[], goalHours: number = 
   for (const entry of entries) {
     dateHours[entry.date] = (dateHours[entry.date] || 0) + entry.hours;
   }
-
   let streak = 0;
   const today = new Date();
   const checkDate = new Date(today);
-
   while (true) {
     const dateStr = formatDate(checkDate);
     const hours = dateHours[dateStr] || 0;
@@ -237,7 +310,6 @@ export function calculateStudyStreak(entries: StudyEntry[], goalHours: number = 
       break;
     }
   }
-
   return streak;
 }
 
@@ -246,13 +318,10 @@ export function calculateLongestStreak(entries: StudyEntry[], goalHours: number 
   for (const entry of entries) {
     dateHours[entry.date] = (dateHours[entry.date] || 0) + entry.hours;
   }
-
   const sortedDates = Object.keys(dateHours).filter(d => dateHours[d] >= goalHours).sort();
   if (sortedDates.length === 0) return 0;
-
   let longest = 1;
   let current = 1;
-
   for (let i = 1; i < sortedDates.length; i++) {
     const prev = new Date(sortedDates[i - 1]);
     const curr = new Date(sortedDates[i]);
@@ -264,23 +333,19 @@ export function calculateLongestStreak(entries: StudyEntry[], goalHours: number 
       current = 1;
     }
   }
-
   return longest;
 }
 
 export function calculateHabitStreak(logs: HabitLog[], habitId: string): number {
   const completedDates = logs
-    .filter(l => l.habitId === habitId && l.completed)
+    .filter(l => l.habit_id === habitId && l.completed)
     .map(l => l.date)
     .sort()
     .reverse();
-
   if (completedDates.length === 0) return 0;
-
   let streak = 0;
   const today = new Date();
   const checkDate = new Date(today);
-
   while (true) {
     const dateStr = formatDate(checkDate);
     if (completedDates.includes(dateStr)) {
@@ -294,21 +359,17 @@ export function calculateHabitStreak(logs: HabitLog[], habitId: string): number 
       break;
     }
   }
-
   return streak;
 }
 
 export function calculateHabitLongestStreak(logs: HabitLog[], habitId: string): number {
   const completedDates = logs
-    .filter(l => l.habitId === habitId && l.completed)
+    .filter(l => l.habit_id === habitId && l.completed)
     .map(l => l.date)
     .sort();
-
   if (completedDates.length === 0) return 0;
-
   let longest = 1;
   let current = 1;
-
   for (let i = 1; i < completedDates.length; i++) {
     const prev = new Date(completedDates[i - 1]);
     const curr = new Date(completedDates[i]);
@@ -320,8 +381,21 @@ export function calculateHabitLongestStreak(logs: HabitLog[], habitId: string): 
       current = 1;
     }
   }
-
   return longest;
+}
+
+export function calculateHabitCompletionRate(logs: HabitLog[], habitId: string, days: number = 30): number {
+  const today = new Date();
+  let completed = 0;
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = formatDate(d);
+    if (logs.some(l => l.habit_id === habitId && l.date === dateStr && l.completed)) {
+      completed++;
+    }
+  }
+  return days > 0 ? (completed / days) * 100 : 0;
 }
 
 const MOTIVATIONAL_QUOTES = [

@@ -1,14 +1,16 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import {
-  StudyEntry, HabitEntry, HabitLog, UserSettings, Badge,
-  getStudyEntries, saveStudyEntries, addStudyEntry, deleteStudyEntry,
+  StudyEntry, HabitEntry, HabitLog, UserSettings, Badge, SavedSubject,
+  getStudyEntries, addStudyEntry, deleteStudyEntry,
   getHabits, addHabit, deleteHabit,
   getHabitLogs, toggleHabitLog,
   getSettings, saveSettings,
   getBadges, checkAndUnlockBadges,
+  getSavedSubjects, deleteSavedSubject,
   formatDate, getWeekDates, getMonthDates,
   calculateStudyStreak, calculateLongestStreak,
   calculateHabitStreak, calculateHabitLongestStreak,
+  calculateHabitCompletionRate,
   getRandomQuote,
 } from './storage';
 import React from 'react';
@@ -19,6 +21,7 @@ interface StudyDataContextValue {
   habitLogs: HabitLog[];
   settings: UserSettings;
   badges: Badge[];
+  savedSubjects: SavedSubject[];
   isLoading: boolean;
   quote: string;
   newBadge: Badge | null;
@@ -29,6 +32,7 @@ interface StudyDataContextValue {
   removeHabit: (id: string) => Promise<void>;
   toggleHabit: (habitId: string, date: string) => Promise<void>;
   updateSettings: (settings: UserSettings) => Promise<void>;
+  removeSavedSubject: (id: string) => Promise<void>;
   refreshData: () => Promise<void>;
   getTodayHours: () => number;
   getWeeklyHours: () => number;
@@ -38,6 +42,9 @@ interface StudyDataContextValue {
   getSubjectTotals: () => { subject: string; hours: number; percentage: number }[];
   getWeeklyData: () => { day: string; hours: number }[];
   getLastWeeklyData: () => { day: string; hours: number }[];
+  getHabitStreak: (habitId: string) => number;
+  getHabitLongestStreak: (habitId: string) => number;
+  getHabitCompletionRate: (habitId: string) => number;
 }
 
 const StudyDataContext = createContext<StudyDataContextValue | null>(null);
@@ -46,8 +53,9 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<StudyEntry[]>([]);
   const [habits, setHabits] = useState<HabitEntry[]>([]);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
-  const [settings, setSettings] = useState<UserSettings>({ dailyGoalHours: 2, weeklyGoalHours: 14 });
+  const [settings, setSettings] = useState<UserSettings>({ daily_goal_hours: 2, weekly_goal_hours: 14 });
   const [badges, setBadges] = useState<Badge[]>([]);
+  const [savedSubjects, setSavedSubjects] = useState<SavedSubject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newBadge, setNewBadge] = useState<Badge | null>(null);
 
@@ -55,14 +63,15 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [e, h, hl, s, b] = await Promise.all([
-        getStudyEntries(), getHabits(), getHabitLogs(), getSettings(), getBadges()
+      const [e, h, hl, s, b, ss] = await Promise.all([
+        getStudyEntries(), getHabits(), getHabitLogs(), getSettings(), getBadges(), getSavedSubjects()
       ]);
       setEntries(e);
       setHabits(h);
       setHabitLogs(hl);
       setSettings(s);
       setBadges(b);
+      setSavedSubjects(ss);
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -74,8 +83,11 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
 
   const addEntry = useCallback(async (date: string, subject: string, hours: number) => {
     const entry = await addStudyEntry({ date, subject, hours });
+    if (!entry) return;
     const updated = [...entries, entry];
     setEntries(updated);
+    const subs = await getSavedSubjects();
+    setSavedSubjects(subs);
     const unlocked = await checkAndUnlockBadges(updated);
     if (unlocked) {
       setNewBadge(unlocked);
@@ -91,13 +103,13 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
 
   const createHabit = useCallback(async (name: string) => {
     const habit = await addHabit(name);
-    setHabits(prev => [...prev, habit]);
+    if (habit) setHabits(prev => [...prev, habit]);
   }, []);
 
   const removeHabit = useCallback(async (id: string) => {
     await deleteHabit(id);
     setHabits(prev => prev.filter(h => h.id !== id));
-    setHabitLogs(prev => prev.filter(l => l.habitId !== id));
+    setHabitLogs(prev => prev.filter(l => l.habit_id !== id));
   }, []);
 
   const toggleHabitCb = useCallback(async (habitId: string, date: string) => {
@@ -109,6 +121,11 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback(async (newSettings: UserSettings) => {
     await saveSettings(newSettings);
     setSettings(newSettings);
+  }, []);
+
+  const removeSavedSubject = useCallback(async (id: string) => {
+    await deleteSavedSubject(id);
+    setSavedSubjects(prev => prev.filter(s => s.id !== id));
   }, []);
 
   const clearNewBadge = useCallback(() => setNewBadge(null), []);
@@ -129,12 +146,12 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
   }, [entries]);
 
   const getCurrentStreak = useCallback(() => {
-    return calculateStudyStreak(entries, settings.dailyGoalHours);
-  }, [entries, settings.dailyGoalHours]);
+    return calculateStudyStreak(entries, settings.daily_goal_hours);
+  }, [entries, settings.daily_goal_hours]);
 
   const getLongestStreak = useCallback(() => {
-    return calculateLongestStreak(entries, settings.dailyGoalHours);
-  }, [entries, settings.dailyGoalHours]);
+    return calculateLongestStreak(entries, settings.daily_goal_hours);
+  }, [entries, settings.daily_goal_hours]);
 
   const getSubjectTotals = useCallback(() => {
     const totals: Record<string, number> = {};
@@ -165,19 +182,35 @@ export function StudyDataProvider({ children }: { children: ReactNode }) {
     }));
   }, [entries]);
 
+  const getHabitStreakCb = useCallback((habitId: string) => {
+    return calculateHabitStreak(habitLogs, habitId);
+  }, [habitLogs]);
+
+  const getHabitLongestStreakCb = useCallback((habitId: string) => {
+    return calculateHabitLongestStreak(habitLogs, habitId);
+  }, [habitLogs]);
+
+  const getHabitCompletionRateCb = useCallback((habitId: string) => {
+    return calculateHabitCompletionRate(habitLogs, habitId);
+  }, [habitLogs]);
+
   const value = useMemo(() => ({
-    entries, habits, habitLogs, settings, badges, isLoading, quote, newBadge,
+    entries, habits, habitLogs, settings, badges, savedSubjects, isLoading, quote, newBadge,
     clearNewBadge, addEntry, removeEntry, createHabit, removeHabit,
-    toggleHabit: toggleHabitCb, updateSettings, refreshData,
+    toggleHabit: toggleHabitCb, updateSettings, removeSavedSubject, refreshData,
     getTodayHours, getWeeklyHours, getMonthlyHours,
     getCurrentStreak, getLongestStreak, getSubjectTotals,
     getWeeklyData, getLastWeeklyData,
-  }), [entries, habits, habitLogs, settings, badges, isLoading, quote, newBadge,
+    getHabitStreak: getHabitStreakCb,
+    getHabitLongestStreak: getHabitLongestStreakCb,
+    getHabitCompletionRate: getHabitCompletionRateCb,
+  }), [entries, habits, habitLogs, settings, badges, savedSubjects, isLoading, quote, newBadge,
     clearNewBadge, addEntry, removeEntry, createHabit, removeHabit,
-    toggleHabitCb, updateSettings, refreshData,
+    toggleHabitCb, updateSettings, removeSavedSubject, refreshData,
     getTodayHours, getWeeklyHours, getMonthlyHours,
     getCurrentStreak, getLongestStreak, getSubjectTotals,
-    getWeeklyData, getLastWeeklyData]);
+    getWeeklyData, getLastWeeklyData,
+    getHabitStreakCb, getHabitLongestStreakCb, getHabitCompletionRateCb]);
 
   return React.createElement(StudyDataContext.Provider, { value }, children);
 }

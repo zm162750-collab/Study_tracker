@@ -21,7 +21,7 @@ export default function WeeklyScreen() {
   const weeklyData = getWeeklyData();
   const lastWeekData = getLastWeeklyData();
   const lastWeekTotal = lastWeekData.reduce((sum, d) => sum + d.hours, 0);
-  const weeklyProgress = settings.weeklyGoalHours > 0 ? weeklyHours / settings.weeklyGoalHours : 0;
+  const weeklyProgress = settings.weekly_goal_hours > 0 ? weeklyHours / settings.weekly_goal_hours : 0;
   const improvement = lastWeekTotal > 0 ? ((weeklyHours - lastWeekTotal) / lastWeekTotal) * 100 : 0;
   const isImproved = weeklyHours > lastWeekTotal;
 
@@ -45,7 +45,7 @@ export default function WeeklyScreen() {
               trackColor={colors.border}
               textColor={colors.text}
               valueText={`${weeklyHours.toFixed(1)}h`}
-              label={`/ ${settings.weeklyGoalHours}h`}
+              label={`/ ${settings.weekly_goal_hours}h`}
             />
           </View>
 
@@ -115,7 +115,7 @@ export default function WeeklyScreen() {
             {weeklyProgress >= 1
               ? 'Great work! You hit your weekly goal. Keep the momentum going!'
               : weeklyProgress >= 0.5
-              ? `You're halfway there! Stay consistent to reach your ${settings.weeklyGoalHours}h target.`
+              ? `You're halfway there! Stay consistent to reach your ${settings.weekly_goal_hours}h target.`
               : 'Start strong this week! Even small study sessions add up over time.'}
           </Text>
         </View>
